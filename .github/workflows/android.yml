@@ -1,0 +1,87 @@
+name: Build Android HD APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test multiplayer server
+        run: |
+          cd server
+          npm install --ignore-scripts
+          npm test
+          node --test integration.test.mjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Download Godot and matching Android export templates
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE=https://github.com/godotengine/godot-builds/releases/download/4.4.1-stable
+          curl -fL --retry 3 "$BASE/Godot_v4.4.1-stable_linux.x86_64.zip" -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          sudo install /tmp/godot/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot
+          curl -fL --retry 3 "$BASE/Godot_v4.4.1-stable_export_templates.tpz" -o /tmp/templates.zip
+          unzip -q /tmp/templates.zip -d /tmp/godot-templates
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.4.1.stable"
+          cp /tmp/godot-templates/templates/android*.apk "$HOME/.local/share/godot/export_templates/4.4.1.stable/"
+          godot --version
+      - name: Configure Android SDK and test signing
+        shell: bash
+        env:
+          GAME_SERVER_URL: ${{ vars.GAME_SERVER_URL }}
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0'
+          mkdir -p "$HOME/.android" "$HOME/.config/godot" build
+          keytool -genkeypair -noprompt -keystore "$HOME/.android/debug.keystore" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=Android Debug,O=Android,C=US'
+          cat > "$HOME/.config/godot/editor_settings-4.4.tres" <<SETTINGS
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "$SDK"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          export/android/debug_keystore = "$HOME/.android/debug.keystore"
+          export/android/debug_keystore_user = "androiddebugkey"
+          export/android/debug_keystore_pass = "android"
+          SETTINGS
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_USER=androiddebugkey" >> "$GITHUB_ENV"
+          echo "GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD=android" >> "$GITHUB_ENV"
+          if [[ -n "$GAME_SERVER_URL" ]]; then printf '%s' "$GAME_SERVER_URL" > game/server_url.txt; fi
+      - name: Download licensed HD models and textures
+        run: python3 tools/fetch_hd_assets.py
+      - name: Import and validate game scripts
+        shell: bash
+        run: |
+          set -eo pipefail
+          godot --headless --path game --editor --import 2>&1 | tee /tmp/import.log
+          godot --headless --path game --script res://hd_art.gd --check-only
+          godot --headless --path game --script res://main.gd --check-only
+          godot --headless --path game --quit-after 5 2>&1 | tee /tmp/smoke.log
+          godot --headless --path game --script res://hd_smoke_test.gd 2>&1 | tee /tmp/hd-smoke.log
+          if grep -E 'SCRIPT ERROR|Parse Error' /tmp/import.log /tmp/smoke.log /tmp/hd-smoke.log; then exit 1; fi
+      - name: Export installable APK
+        run: |
+          godot --headless --path game --export-debug Android "$GITHUB_WORKSPACE/build/CloseQuartersHD.apk"
+          test -s build/CloseQuartersHD.apk
+          "${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/34.0.0/apksigner" verify --verbose build/CloseQuartersHD.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CloseQuarters-HD-Android-APK
+          path: |
+            build/CloseQuartersHD.apk
+            game/assets/online/manifest.json
+          if-no-files-found: error
+          retention-days: 14

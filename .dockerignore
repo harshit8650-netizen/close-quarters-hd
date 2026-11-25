@@ -1,0 +1,5 @@
+.git
+**/.godot
+**/node_modules
+**/data
+build

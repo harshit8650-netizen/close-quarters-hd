@@ -1,0 +1,10 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {Room,newPlayer,maps,weapons,blocked,lineClear} from './engine.mjs';
+const setup=()=>{let r=new Room('TEST',0);for(let i=0;i<2;i++)r.add(newPlayer('p'+i,'Player '+i,{}));assert(r.start('p0'));return r;};
+test('five maps and clear spawn points',()=>{assert.equal(maps.length,5);for(let m of maps)for(let [x,z] of m.spawns)assert(!blocked(m,x,z));assert.equal(weapons.length,9);});
+test('room maximum and host rules',()=>{let r=new Room('A',0);for(let i=0;i<4;i++)assert(r.add(newPlayer('p'+i,'P',{})));assert(!r.add(newPlayer('extra','P',{})));assert(!r.start('p1'));assert(r.start('p0'));});
+test('movement, collision and input validation',()=>{let r=setup(),p=r.players[0];p.x=0;p.z=0;r.input(p.id,{yaw:0,x:100,z:0,weapon:0});r.tick(.1);assert(p.x>0&&p.x<=.49);p.x=19;p.z=0;r.tick(.1);assert(p.x<=19.1);});
+test('combat, ammo and winner',()=>{let r=setup(),[a,b]=r.players;a.x=0;a.z=0;b.x=0;b.z=-5;r.input(a.id,{yaw:0,fire:true,weapon:0});for(let i=0;i<30;i++){r.input(a.id,{yaw:0,fire:true,weapon:0});r.tick(.05);}assert.equal(r.winner,a.id);assert.equal(a.kills,1);assert(a.ammo[0]<30);});
+test('walls obstruct line of sight',()=>{assert(!lineClear(maps[0],{x:-12,z:-14},{x:-12,z:-10}));});
+test('zone begins at 240 seconds and match ends by 300',()=>{let r=setup();for(let p of r.players){p.x=0;p.z=0;}r.tick(239);assert.equal(r.zone,20);r.tick(2);assert(r.zone<20);r.tick(59);assert.equal(r.phase,'ended');});
+test('reload transfers reserve ammo',()=>{let r=setup(),p=r.players[0];p.ammo[0]=0;r.input(p.id,{reload:true,weapon:0});for(let i=0;i<32;i++)r.tick(.05);assert.equal(p.ammo[0],30);assert.equal(p.reserve[0],90);});
+test('smoke and flash effects',()=>{let r=setup(),[a,b]=r.players;a.x=0;a.z=0;b.x=0;b.z=-10;r.input(a.id,{yaw:0,weapon:7,fire:true});r.tick(.05);r.input(a.id,{yaw:0,weapon:7});for(let i=0;i<30;i++)r.tick(.05);assert(r.effects.some(e=>e.kind==='smoke'));r.input(a.id,{yaw:0,weapon:8,fire:true});r.tick(.05);r.input(a.id,{yaw:0,weapon:8});for(let i=0;i<30;i++)r.tick(.05);assert(b.flash>0);});
