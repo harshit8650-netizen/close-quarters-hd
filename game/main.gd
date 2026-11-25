@@ -312,7 +312,7 @@ func build_map(index: int):
 	e.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	e.ambient_light_color = Color("d9e6fa")
 	e.ambient_light_energy = .53
-	e.reflected_light_source = Environment.REFLECTED_SOURCE_BG
+	e.reflected_light_source = Environment.REFLECTION_SOURCE_BG
 	e.glow_enabled = quality>0
 	e.glow_intensity = .25
 	e.tonemap_mode = Environment.TONE_MAPPER_FILMIC
